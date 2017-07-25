@@ -109,24 +109,24 @@ def densenet121_model(img_rows, img_cols, color_type=1, nb_dense_block=4, growth
 
     model.load_weights(weights_path, by_name=True)
 
-    # 固定参数
-    for layer in model.layers:
-        layer.trainable = False
+    # # 固定参数
+    # for layer in model.layers:
+    #     layer.trainable = False
 
-    # Truncate and replace softmax layer for transfer learning
-    # Cannot use model.layers.pop() since model is not of Sequential() type
-    # The method below works since pre-trained weights are stored in layers but not in the model
-    x_newfc = GlobalAveragePooling2D(name='pool'+str(final_stage))(tensor_x)
-    x_newfc = Dense(num_classes, name='fc6')(x_newfc)
-    x_newfc = Activation('softmax', name='prob')(x_newfc)
+    # # Truncate and replace softmax layer for transfer learning
+    # # Cannot use model.layers.pop() since model is not of Sequential() type
+    # # The method below works since pre-trained weights are stored in layers but not in the model
+    # x_newfc = GlobalAveragePooling2D(name='pool'+str(final_stage))(tensor_x)
+    # x_newfc = Dense(num_classes, name='fc6')(x_newfc)
+    # x_newfc = Activation('softmax', name='prob')(x_newfc)
 
-    new_model = Model(img_input, x_newfc)
+    # new_model = Model(img_input, x_newfc)
 
-    # Learning rate is changed to 0.001
-    sgd = SGD(lr=1e-3, decay=1e-6, momentum=0.9, nesterov=True)
-    new_model.compile(optimizer=sgd, loss='categorical_crossentropy', metrics=['accuracy'])
+    # # Learning rate is changed to 0.001
+    # sgd = SGD(lr=1e-3, decay=1e-6, momentum=0.9, nesterov=True)
+    # new_model.compile(optimizer=sgd, loss='categorical_crossentropy', metrics=['accuracy'])
 
-    return new_model
+    return model
 
 def conv_block(tensor_x, stage, branch, nb_filter, dropout_rate=None, weight_decay=1e-4):
     '''
@@ -228,6 +228,45 @@ def dense_block(tensor_x, stage, nb_layers, nb_filter, growth_rate, dropout_rate
 
     return concat_feat, nb_filter
 
+def add_new_layer(base_model, nb_classes):
+    '''
+    ### 说明:
+        - 增加模型的层
+    ### 参数:
+        - base_model: 原始模型
+        - nb_classes: 新模型的分类
+    ### 返回:
+        - model: 新模型
+    '''
+
+    # 并获取模型输出
+    # temp_model = Model(inputs=base_model.inputs, outputs=base_model.get_layer('relu5_blk').output)
+    # tenser_x = temp_model.outputs
+    tenser_x = base_model.get_layer('relu5_blk').output
+
+    # 增加新的层
+    tenser_x = GlobalAveragePooling2D()(tenser_x)
+    tenser_x = Dense(1024, activation='relu')(tenser_x) # new FC
+    predictions = Dense(nb_classes, activation='softmax')(tenser_x) # new softmax
+
+    model = Model(inputs=base_model.input, outputs=predictions)
+    return model
+
+def setup_to_transfer_learn(model, base_model):
+    '''
+    ### 说明:
+        - 固定参数，设置迁移学习
+    ### 参数:
+        - model: 新模型
+        - base_model: 原始模型
+    ### 返回:
+        - 无
+    '''
+
+    for layer in base_model.layers:
+        layer.trainable = False
+    model.compile(optimizer='rmsprop', loss='categorical_crossentropy', metrics=['accuracy'])
+
 if __name__ == '__main__':
 
     # Example to fine-tune on n samples from digestive data
@@ -245,15 +284,17 @@ if __name__ == '__main__':
     # Load Cifar10 data. Please implement your own load_data() module for your own dataset
     # X_TRAIN, Y_TRAIN, X_VALID, Y_VALID = load_cifar10_data(IMG_ROWS, IMG_COLS)
     X_TRAIN, Y_TRAIN = load_mydata_with_cifar10('./my_data_set/', 'train', \
-                                                NUM_TRAIN_SAMPLES, NUM_BATCH, 224, NUM_CLASSES, 0.9)
+                                                NUM_TRAIN_SAMPLES, NUM_BATCH, 224, NUM_CLASSES, 0.7)
     X_VALID, Y_VALID = load_mydata_with_cifar10('./my_data_set/', 'valid', \
-                                                NUM_VALID_SAMPLES, NUM_BATCH, 224, NUM_CLASSES, 0.9)
+                                                NUM_VALID_SAMPLES, NUM_BATCH, 224, NUM_CLASSES, 0.7)
 
     X_TRAIN = X_TRAIN.astype('float32') / 255.0
     X_VALID = X_VALID.astype('float32') / 255.0
 
     # Load our model
-    MODEL = densenet121_model(img_rows=IMG_ROWS, img_cols=IMG_COLS, color_type=CHANNEL, num_classes=NUM_CLASSES)
+    BASE_MODEL = densenet121_model(img_rows=IMG_ROWS, img_cols=IMG_COLS, color_type=CHANNEL, num_classes=NUM_CLASSES)
+    MODEL = add_new_layer(BASE_MODEL, NUM_CLASSES)
+    setup_to_transfer_learn(MODEL, BASE_MODEL)
 
     # Start Fine-tuning
     MODEL.fit(X_TRAIN, Y_TRAIN,
@@ -272,4 +313,3 @@ if __name__ == '__main__':
 
     # Cross-entropy loss score
     SCORE = log_loss(Y_VALID, PREDICTIONS_VALID)
-
