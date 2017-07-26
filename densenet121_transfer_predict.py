@@ -26,10 +26,6 @@ import keras.backend as K
 
 from custom_layers.scale_layer import Scale
 
-# from load_cifar10 import load_cifar10_data
-
-# from load_my_data import load_mydata_with_cifar10
-
 def densenet121_model(img_rows, img_cols, color_type=1, nb_dense_block=4, growth_rate=32, \
                         nb_filter=64, reduction=0.5, dropout_rate=0.0, weight_decay=1e-4, num_classes=None):
     '''
@@ -100,46 +96,51 @@ def densenet121_model(img_rows, img_cols, color_type=1, nb_dense_block=4, growth
     tensor_x = Scale(axis=CONCAT_AXIS, name='conv' + str(final_stage) + '_blk_scale')(tensor_x)
     tensor_x = Activation('relu', name='relu' + str(final_stage) + '_blk')(tensor_x)
 
-    # x_fc = GlobalAveragePooling2D(name='pool' + str(final_stage))(tensor_x)
-    # x_fc = Dense(1000, name='fc6')(x_fc)
-    # x_fc = Activation('softmax', name='prob')(x_fc)
+    x_fc = GlobalAveragePooling2D(name='pool' + str(final_stage))(tensor_x)
+    x_fc = Dense(1000, name='fc6')(x_fc)
+    x_fc = Activation('softmax', name='prob')(x_fc)
 
-    # model = Model(img_input, x_fc, name='densenet')
+    model = Model(img_input, x_fc, name='densenet')
 
-    # if K.image_dim_ordering() == 'th':
-    #     # Use pre-trained weights for Theano backend
-    #     weights_path = 'imagenet_models/densenet121_weights_th.h5'
-    # else:
-    #     # Use pre-trained weights for Tensorflow backend
-    #     weights_path = 'imagenet_models/densenet121_weights_tf.h5'
+    if K.image_dim_ordering() == 'th':
+        # Use pre-trained weights for Theano backend
+        weights_path = 'imagenet_models/densenet121_weights_th.h5'
+    else:
+        # Use pre-trained weights for Tensorflow backend
+        weights_path = 'imagenet_models/densenet121_weights_tf.h5'
 
-    # model.load_weights(weights_path, by_name=True)
+    model.load_weights(weights_path, by_name=True)
 
-    # Truncate and replace softmax layer for transfer learning
-    # Cannot use model.layers.pop() since model is not of Sequential() type
-    # The method below works since pre-trained weights are stored in layers but not in the model
-    x_newfc = GlobalAveragePooling2D(name='pool'+str(final_stage))(tensor_x)
-    x_newfc = Dense(num_classes, name='fc6')(x_newfc)
-    x_newfc = Activation('softmax', name='prob')(x_newfc)
+    # # 固定参数
+    # for layer in model.layers:
+    #     layer.trainable = False
 
-    model = Model(img_input, x_newfc)
-    model.load_weights('cifar10_transfer_weights.h5', by_name=True)
+    # # Truncate and replace softmax layer for transfer learning
+    # # Cannot use model.layers.pop() since model is not of Sequential() type
+    # # The method below works since pre-trained weights are stored in layers but not in the model
+    # x_newfc = GlobalAveragePooling2D(name='pool'+str(final_stage))(tensor_x)
+    # x_newfc = Dense(num_classes, name='fc6')(x_newfc)
+    # x_newfc = Activation('softmax', name='prob')(x_newfc)
 
-    # Learning rate is changed to 0.001
-    sgd = SGD(lr=1e-3, decay=1e-6, momentum=0.9, nesterov=True)
-    model.compile(optimizer=sgd, loss='categorical_crossentropy', metrics=['accuracy'])
+    # new_model = Model(img_input, x_newfc)
+
+    # # Learning rate is changed to 0.001
+    # sgd = SGD(lr=1e-3, decay=1e-6, momentum=0.9, nesterov=True)
+    # new_model.compile(optimizer=sgd, loss='categorical_crossentropy', metrics=['accuracy'])
 
     return model
 
 def conv_block(tensor_x, stage, branch, nb_filter, dropout_rate=None, weight_decay=1e-4):
-    '''Apply BatchNorm, Relu, bottleneck 1x1 Conv2D, 3x3 Conv2D, and option dropout
-        ### Arguments
-            - tensor_x: input tensor
-            - stage: index for dense block
-            - branch: layer index within each dense block
-            - nb_filter: number of filters
-            - dropout_rate: dropout rate
-            - weight_decay: weight decay factor
+    '''
+    ### 说明:
+        Apply BatchNorm, Relu, bottleneck 1x1 Conv2D, 3x3 Conv2D, and option dropout
+    ### Arguments
+        - tensor_x: input tensor
+        - stage: index for dense block
+        - branch: layer index within each dense block
+        - nb_filter: number of filters
+        - dropout_rate: dropout rate
+        - weight_decay: weight decay factor
     '''
     eps = 1.1e-5
     conv_name_base = 'conv' + str(stage) + '_' + str(branch)
@@ -168,14 +169,16 @@ def conv_block(tensor_x, stage, branch, nb_filter, dropout_rate=None, weight_dec
     return tensor_x
 
 def transition_block(tensor_x, stage, nb_filter, compression=1.0, dropout_rate=None, weight_decay=1E-4):
-    ''' Apply BatchNorm, 1x1 Convolution, averagePooling, optional compression, dropout
-        ### Arguments
-            - tensor_x: input tensor
-            - stage: index for dense block
-            - nb_filter: number of filters
-            - compression: calculated as 1 - reduction. Reduces the number of feature maps in the transition block.
-            - dropout_rate: dropout rate
-            - weight_decay: weight decay factor
+    '''
+    ### 说明:
+        Apply BatchNorm, 1x1 Convolution, averagePooling, optional compression, dropout
+    ### Arguments
+        - tensor_x: input tensor
+        - stage: index for dense block
+        - nb_filter: number of filters
+        - compression: calculated as 1 - reduction. Reduces the number of feature maps in the transition block.
+        - dropout_rate: dropout rate
+        - weight_decay: weight decay factor
     '''
 
     eps = 1.1e-5
@@ -198,16 +201,18 @@ def transition_block(tensor_x, stage, nb_filter, compression=1.0, dropout_rate=N
 
 def dense_block(tensor_x, stage, nb_layers, nb_filter, growth_rate, dropout_rate=None, \
                 weight_decay=1e-4, grow_nb_filters=True):
-    ''' Build a dense_block where the output of each conv_block is fed to subsequent ones
-        ### Arguments
-            - tensor_x: input tensor
-            - stage: index for dense block
-            - nb_layers: the number of layers of conv_block to append to the model.
-            - nb_filter: number of filters
-            - growth_rate: growth rate
-            - dropout_rate: dropout rate
-            - weight_decay: weight decay factor
-            - grow_nb_filters: flag to decide to allow number of filters to grow
+    '''
+    # 说明:
+        Build a dense_block where the output of each conv_block is fed to subsequent ones
+    # Arguments
+        - tensor_x: input tensor
+        - stage: index for dense block
+        - nb_layers: the number of layers of conv_block to append to the model.
+        - nb_filter: number of filters
+        - growth_rate: growth rate
+        - dropout_rate: dropout rate
+        - weight_decay: weight decay factor
+        - grow_nb_filters: flag to decide to allow number of filters to grow
     '''
 
     # eps = 1.1e-5
@@ -225,6 +230,45 @@ def dense_block(tensor_x, stage, nb_layers, nb_filter, growth_rate, dropout_rate
 
     return concat_feat, nb_filter
 
+def add_new_layer(base_model, nb_classes):
+    '''
+    ### 说明:
+        - 增加模型的层
+    ### 参数:
+        - base_model: 原始模型
+        - nb_classes: 新模型的分类
+    ### 返回:
+        - model: 新模型
+    '''
+
+    # 并获取模型输出
+    # temp_model = Model(inputs=base_model.inputs, outputs=base_model.get_layer('relu5_blk').output)
+    # tenser_x = temp_model.outputs
+    tenser_x = base_model.get_layer('relu5_blk').output
+
+    # 增加新的层
+    tenser_x = GlobalAveragePooling2D()(tenser_x)
+    tenser_x = Dense(1024, activation='relu')(tenser_x) # new FC
+    predictions = Dense(nb_classes, activation='softmax')(tenser_x) # new softmax
+
+    model = Model(inputs=base_model.input, outputs=predictions)
+    return model
+
+def setup_to_transfer_learn(model, base_model):
+    '''
+    ### 说明:
+        - 固定参数，设置迁移学习
+    ### 参数:
+        - model: 新模型
+        - base_model: 原始模型
+    ### 返回:
+        - 无
+    '''
+
+    for layer in base_model.layers:
+        layer.trainable = False
+    model.compile(optimizer='rmsprop', loss='categorical_crossentropy', metrics=['accuracy'])
+
 if __name__ == '__main__':
 
     IMG_ROWS, IMG_COLS = 224, 224 # Resolution of inputs
@@ -232,9 +276,12 @@ if __name__ == '__main__':
     NUM_CLASSES = 3
 
     # Load our model
-    MODEL = densenet121_model(img_rows=IMG_ROWS, img_cols=IMG_COLS, color_type=CHANNEL, num_classes=NUM_CLASSES)
+    BASE_MODEL = densenet121_model(img_rows=IMG_ROWS, img_cols=IMG_COLS, color_type=CHANNEL, num_classes=NUM_CLASSES)
+    MODEL = add_new_layer(BASE_MODEL, NUM_CLASSES)
+    MODEL.load_weights('cifar10_transfer_weights.h5', by_name=True)
+    # setup_to_transfer_learn(MODEL, BASE_MODEL)
 
-    IMG = cv2.imread('3_005794.jpg')
+    IMG = cv2.imread('2_03068.jpg')
     IMG = cv2.resize(IMG[80:400, 80:400, :], (224, 224))
     # if K.image_dim_ordering() == 'th':
     #     IMG = IMG.transpose((2, 0, 1))
