@@ -16,9 +16,12 @@ from keras.layers.normalization import BatchNormalization
 from keras.models import Model, save_model
 import keras.backend as K
 
-from load_my_data import load_mydata_with_cifar10
+# from load_my_data import load_mydata_with_cifar10
 
-from sklearn.metrics import log_loss
+from keras.preprocessing.image import ImageDataGenerator
+from keras.callbacks import ModelCheckpoint, EarlyStopping
+
+# from sklearn.metrics import log_loss
 from custom_layers.scale_layer import Scale
 
 # from load_cifar10 import load_cifar10_data
@@ -26,7 +29,7 @@ from custom_layers.scale_layer import Scale
 def densenet121_model(img_rows, img_cols, color_type=1, nb_dense_block=4, growth_rate=32, \
                         nb_filter=64, reduction=0.5, dropout_rate=0.0, weight_decay=1e-4, num_classes=None):
     '''
-    # 说明:
+    ### 说明：
         - DenseNet 121 Model for Keras
         - Model Schema is based on https://github.com/flyyufelix/DenseNet-Keras
         - ImageNet Pretrained Weights
@@ -35,7 +38,7 @@ def densenet121_model(img_rows, img_cols, color_type=1, nb_dense_block=4, growth
         - TensorFlow:
             https://drive.google.com/open?id=0Byy2AcGyEVxfSTA4SHJVOHNuTXc
 
-    # Arguments
+    ### Arguments
         - nb_dense_block: number of dense blocks to add to end
         - growth_rate: number of filters to add per dense block
         - nb_filter: initial number of filters
@@ -44,7 +47,7 @@ def densenet121_model(img_rows, img_cols, color_type=1, nb_dense_block=4, growth
         - weight_decay: weight decay factor
         - classes: optional number of classes to classify images
         - weights_path: path to pre-trained weights
-    # Returns
+    ### Returns
         - A Keras model instance.
     '''
     eps = 1.1e-5
@@ -111,9 +114,17 @@ def densenet121_model(img_rows, img_cols, color_type=1, nb_dense_block=4, growth
     # Truncate and replace softmax layer for transfer learning
     # Cannot use model.layers.pop() since model is not of Sequential() type
     # The method below works since pre-trained weights are stored in layers but not in the model
+    tensor_x = Conv2D(128, (3, 3), name='conv_new', use_bias=False)(tensor_x)
+    tensor_x = AveragePooling2D((2, 2), strides=(2, 2), name='pool_new')(tensor_x)
+    tensor_x = BatchNormalization(epsilon=eps, axis=CONCAT_AXIS, name='bn_new')(tensor_x)
+    tensor_x = Activation('relu', name='relu_new')(tensor_x)
     x_newfc = GlobalAveragePooling2D(name='pool'+str(final_stage))(tensor_x)
     x_newfc = Dense(num_classes, name='fc6')(x_newfc)
     x_newfc = Activation('softmax', name='prob')(x_newfc)
+    # x_newfc = MaxPooling2D((2, 2), strides=(2, 2), name='pool'+str(final_stage))(tensor_x)
+    # x_newfc = GlobalAveragePooling2D(name='new_maxpool')(x_newfc) # new max pooling layer
+    # x_newfc = Dense(num_classes, name='fc6')(x_newfc)
+    # x_newfc = Activation('softmax', name='prob')(x_newfc)
 
     model = Model(img_input, x_newfc)
 
@@ -126,7 +137,8 @@ def densenet121_model(img_rows, img_cols, color_type=1, nb_dense_block=4, growth
 def conv_block(tensor_x, stage, branch, nb_filter, dropout_rate=None, weight_decay=1e-4):
     '''
     ### 说明:
-        Apply BatchNorm, Relu, bottleneck 1x1 Conv2D, 3x3 Conv2D, and option dropout
+        - Apply BatchNorm, Relu, bottleneck 1x1 Conv2D, 3x3 Conv2D, and option dropout
+
     ### Arguments
         - tensor_x: input tensor
         - stage: index for dense block
@@ -227,43 +239,53 @@ if __name__ == '__main__':
 
     # Example to fine-tune on n samples from digestive data
 
-    IMG_ROWS, IMG_COLS = 224, 224 # Resolution of inputs
+    IMG_ROWS, IMG_COLS = 480, 480 # Resolution of inputs
     CHANNEL = 3
     NUM_CLASSES = 3
-    BATCH_SIZE = 32
-    EPOCHS = 10
+    BATCH_SIZE = 8
+    EPOCHS = 30
 
-    NUM_TRAIN_SAMPLES = 23968
-    NUM_VALID_SAMPLES = 10275
-    NUM_BATCH = 30
-
-    # Load Cifar10 data. Please implement your own load_data() module for your own dataset
-    # X_TRAIN, Y_TRAIN, X_VALID, Y_VALID = load_cifar10_data(IMG_ROWS, IMG_COLS)
-    X_TRAIN, Y_TRAIN = load_mydata_with_cifar10('./my_data_set/', 'train', \
-                                                NUM_TRAIN_SAMPLES, NUM_BATCH, 224, NUM_CLASSES, 0.9)
-    X_VALID, Y_VALID = load_mydata_with_cifar10('./my_data_set/', 'valid', \
-                                                NUM_VALID_SAMPLES, NUM_BATCH, 224, NUM_CLASSES, 0.9)
-
-    X_TRAIN = X_TRAIN.astype('float32') / 255.0
-    X_VALID = X_VALID.astype('float32') / 255.0
+    # # 数据生成
+    # TRAIN_DIR = '/home/get_samples/samples_train/train'
+    # VALID_DIR = '/home/get_samples/samples_train/valid'
+    # DATA_GEN = ImageDataGenerator(rescale=1./255, \
+    #                               rotation_range=15, \
+    #                               shear_range=10, \
+    #                               horizontal_flip=True, \
+    #                               vertical_flip=True)
+    # TRAIN_GEN = DATA_GEN.flow_from_directory(directory=TRAIN_DIR, \
+    #                                          target_size=(IMG_ROWS, IMG_COLS), \
+    #                                          batch_size=BATCH_SIZE, \
+    #                                          class_mode='categorical')
+    # VALID_GEN = DATA_GEN.flow_from_directory(directory=VALID_DIR, \
+    #                                          target_size=(IMG_ROWS, IMG_COLS), \
+    #                                          batch_size=BATCH_SIZE, \
+    #                                          class_mode='categorical')
 
     # Load our model
-    MODEL = densenet121_model(img_rows=IMG_ROWS, img_cols=IMG_COLS, color_type=CHANNEL, num_classes=NUM_CLASSES)
+    MODEL = densenet121_model(img_rows=IMG_ROWS, img_cols=IMG_COLS, color_type=CHANNEL, \
+                              num_classes=NUM_CLASSES)
+    MODEL.summary()
 
-    # Start Fine-tuning
-    MODEL.fit(X_TRAIN, Y_TRAIN,
-              batch_size=BATCH_SIZE,
-              epochs=EPOCHS,
-              shuffle=True,
-              verbose=2,
-              validation_data=(X_VALID, Y_VALID))
+    # # Start Fine-tuning
+    # EATLYSTOP = EarlyStopping(monitor='val_loss', min_delta=0.001, patience=5, verbose=1, mode='auto')
+    # MODELCHECHPOINT = ModelCheckpoint('cifar10_weights', monitor='val_loss', \
+    #                                     verbose=1, save_weights_only=True)
+    # HIST = MODEL.fit_generator(TRAIN_GEN, \
+    #                            steps_per_epoch=6000, \
+    #                            epochs=EPOCHS, \
+    #                            verbose=1, \
+    #                            callbacks=[EATLYSTOP, MODELCHECHPOINT], \
+    #                            validation_data=VALID_GEN, \
+    #                            validation_steps=1500)
+    # print HIST.history
 
-    # save model
-    save_model(MODEL, 'cifar10.h5')
-    MODEL.save_weights('cifar10_weights.h5')
+    # # save model
+    # save_model(MODEL, 'cifar10.h5')
+    # MODEL.save_weights('cifar10_weights.h5')
 
-    # Make predictions
-    PREDICTIONS_VALID = MODEL.predict(X_VALID, batch_size=BATCH_SIZE, verbose=1)
+    # # Make predictions
+    # PREDICTIONS_VALID = MODEL.predict(X_VALID, batch_size=BATCH_SIZE, verbose=1)
 
-    # Cross-entropy loss score
-    SCORE = log_loss(Y_VALID, PREDICTIONS_VALID)
+    # # Cross-entropy loss score
+    # SCORE = log_loss(Y_VALID, PREDICTIONS_VALID)

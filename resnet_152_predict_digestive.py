@@ -1,12 +1,17 @@
 # -*- coding: utf-8 -*-
 """
-# resnet_152.py
+# resnet_152_predict_digestive.py
 # @Author       : yuanwenjin
 # @Mail         : yfor1008@gmail.com
-# @Date         : 2017/7/14 上午9:23:13
-# @Explanation  : finetune自己数据
+# @Date         : 2017/7/14 涓婂崍9:23:13
+# @Explanation  : finetune鑷繁鏁版嵁
 """
 
+import os
+import math
+import numpy as np
+import scipy.io as scio
+import cv2
 from keras.models import Sequential
 from keras.optimizers import SGD
 from keras.layers import Input, Dense, Conv2D, MaxPooling2D, AveragePooling2D, GlobalAveragePooling2D, ZeroPadding2D, Dropout, Flatten, add, Reshape, Activation
@@ -28,7 +33,7 @@ sys.setrecursionlimit(3000)
 
 def identity_block(input_tensor, kernel_size, filters, stage, block):
     """
-    ### 说明:
+    ### 璇存槑:
         - The identity_block is the block that has no conv layer at shortcut
 
     ### Arguments:
@@ -65,7 +70,7 @@ def identity_block(input_tensor, kernel_size, filters, stage, block):
 
 def conv_block(input_tensor, kernel_size, filters, stage, block, strides=(2, 2)):
     '''
-    ### 说明
+    ### 璇存槑
         - conv_block is the block that has a conv layer at shortcut
 
     ### Arguments
@@ -75,7 +80,7 @@ def conv_block(input_tensor, kernel_size, filters, stage, block, strides=(2, 2))
         - stage: integer, current stage label, used for generating layer names
         - block: 'a','b'..., current block label, used for generating layer names
 
-    ### 注意
+    ### 娉ㄦ剰
         - Note that from stage 3, the first conv layer at main path is with strides=(2,2)
         - And the shortcut should have strides=(2,2) as well
     '''
@@ -162,19 +167,19 @@ def resnet152_model(img_rows, img_cols, color_type=1, num_classes=None):
     # x_fc = AveragePooling2D((7, 7), name='avg_pool')(x)
     # x_fc = Flatten()(x_fc)
     # x_fc = Dense(1000, activation='softmax', name='fc1000')(x_fc)
-    x_fc = GlobalAveragePooling2D(name='avg_pool')(x)
-    x_fc = Dense(1000, activation='softmax', name='fc1000')(x_fc)
+    # x_fc = GlobalAveragePooling2D(name='avg_pool')(x)
+    # x_fc = Dense(1000, activation='softmax', name='fc1000')(x_fc)
 
-    model = Model(img_input, x_fc)
+    # model = Model(img_input, x_fc)
 
-    if K.image_dim_ordering() == 'th':
-      	# Use pre-trained weights for Theano backend
-      	weights_path = 'imagenet_models/resnet152_weights_th.h5'
-    else:
-      	# Use pre-trained weights for Tensorflow backend
-      	weights_path = 'imagenet_models/resnet152_weights_tf.h5'
+    # if K.image_dim_ordering() == 'th':
+    #     # Use pre-trained weights for Theano backend
+    #     weights_path = 'imagenet_models/resnet101_weights_th.h5'
+    # else:
+    #     # Use pre-trained weights for Tensorflow backend
+    #     weights_path = 'imagenet_models/resnet101_weights_tf.h5'
 
-    model.load_weights(weights_path, by_name=True)
+    # model.load_weights(weights_path, by_name=True)
 
     # Truncate and replace softmax layer for transfer learning
     # Cannot use model.layers.pop() since model is not of Sequential() type
@@ -186,10 +191,11 @@ def resnet152_model(img_rows, img_cols, color_type=1, num_classes=None):
     x_newfc = Dense(num_classes, activation='softmax', name='fc8')(x_newfc)
 
     model = Model(img_input, x_newfc)
+    model.load_weights('resnet_weights.h5', by_name=True)
 
     # Learning rate is changed to 0.001
-    sgd = SGD(lr=1e-3, decay=1e-6, momentum=0.9, nesterov=True)
-    model.compile(optimizer=sgd, loss='categorical_crossentropy', metrics=['accuracy'])
+    # sgd = SGD(lr=1e-3, decay=1e-6, momentum=0.9, nesterov=True)
+    # model.compile(optimizer=sgd, loss='categorical_crossentropy', metrics=['accuracy'])
 
     return model
 
@@ -200,44 +206,44 @@ if __name__ == '__main__':
     IMG_ROWS, IMG_COLS = 480, 480 # Resolution of inputs
     CHANNEL = 3
     NUM_CLASSES = 3
-    BATCH_SIZE = 8
-    EPOCHS = 30
 
-    # # 数据生成
-    # TRAIN_DIR = '/home/get_samples/samples_train/train'
-    # VALID_DIR = '/home/get_samples/samples_train/valid'
-    # DATA_GEN = ImageDataGenerator(rescale=1./255, \
-    #                               rotation_range=15, \
-    #                               shear_range=10, \
-    #                               horizontal_flip=True, \
-    #                               vertical_flip=True)
-    # TRAIN_GEN = DATA_GEN.flow_from_directory(directory=TRAIN_DIR, \
-    #                                          target_size=(IMG_ROWS, IMG_COLS), \
-    #                                          batch_size=BATCH_SIZE, \
-    #                                          class_mode='categorical')
-    # VALID_GEN = DATA_GEN.flow_from_directory(directory=VALID_DIR, \
-    #                                          target_size=(IMG_ROWS, IMG_COLS), \
-    #                                          batch_size=BATCH_SIZE, \
-    #                                          class_mode='categorical')
+    BATCH_SIZE = 512
 
     # Load our model
     MODEL = resnet152_model(img_rows=IMG_ROWS, img_cols=IMG_COLS, color_type=CHANNEL, \
                               num_classes=NUM_CLASSES)
-    MODEL.summary()
 
-    # # Start Fine-tuning
-    # # EATLYSTOP = EarlyStopping(monitor='val_loss', min_delta=0.001, patience=5, verbose=1, mode='auto')
-    # MODELCHECHPOINT = ModelCheckpoint('resnet_weights.h5', monitor='val_loss', \
-    #                                     verbose=1, save_weights_only=True)
-    # HIST = MODEL.fit_generator(TRAIN_GEN, \
-    #                            steps_per_epoch=6000, \
-    #                            epochs=EPOCHS, \
-    #                            verbose=1, \
-    #                            callbacks=[MODELCHECHPOINT], \
-    #                            validation_data=VALID_GEN, \
-    #                            validation_steps=1500)
-    # print HIST.history
+    # 鏁版嵁璺緞
+    DIGESTIVE_DIR = u'/home/tensorflow/digestive_change'
+    CLASSIFIED_DIR = u'/home/densenet/cnn_finetune-master/results_resnet_480'
 
-    # # save model
-    # # save_model(MODEL, 'resnet.h5')
-    # MODEL.save_weights('resnet_weights.h5')
+    # 姣忎釜鏁版嵁澶勭悊
+    DATA_DIRS = []
+    for data_dir in os.listdir(DIGESTIVE_DIR):
+        DATA_DIRS.append(os.path.join(DIGESTIVE_DIR, data_dir))
+
+    for data_dir in DATA_DIRS[72:95]:
+        print os.path.basename(data_dir)
+        imagelists = [img for img in os.listdir(data_dir) if img.endswith('jpg')]
+        imagelists.sort()
+        # imagelists = imagelists[0:2]
+
+        batch_num = int(math.ceil(float(len(imagelists)) / float(BATCH_SIZE)))
+        # print batch_num
+
+        predictions = []
+        for batch_idx in xrange(batch_num):
+            start = batch_idx * BATCH_SIZE
+            end = min((batch_idx + 1) * BATCH_SIZE, len(imagelists))
+
+            imgs = []
+            for idx in xrange(start, end):
+                img = cv2.imread(os.path.join(data_dir, imagelists[idx]).encode('utf8'))
+                # img = cv2.resize(img, (224, 224))
+                img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+                imgs.append(img)
+            imgs = np.array(imgs, dtype='float32') / 255.0
+            prediction = np.argmax(MODEL.predict(np.array(imgs)), 1).tolist()
+            predictions.extend(prediction)
+            # print batch_idx, len(predictions)
+        scio.savemat(os.path.join(CLASSIFIED_DIR, os.path.basename(data_dir) + '.mat'), {'data': predictions})

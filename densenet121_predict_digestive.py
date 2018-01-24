@@ -1,28 +1,35 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
-# densenet121_transfer.py
+# densenet121_predict_digestive.py
 # @Author       : yuanwenjin
 # @Mail         : yfor1008@gmail.com
-# @Date         : 2017/7/24 下午5:23:14
-# @Explanation  : transfer learniing 自己数据
+# @Date         : 2017/7/19 下午2:34:14
+# @Explanation  : 批量预测
 """
 
+import os
+import math
+import numpy as np
+import scipy.io as scio
+import cv2
 from keras.optimizers import SGD
 from keras.layers import Input, concatenate, ZeroPadding2D
 from keras.layers.core import Dense, Dropout, Activation
 from keras.layers.convolutional import Conv2D
 from keras.layers.pooling import AveragePooling2D, GlobalAveragePooling2D, MaxPooling2D
 from keras.layers.normalization import BatchNormalization
-from keras.models import Model, save_model
+from keras.models import Model
 import keras.backend as K
 
-from load_my_data import load_mydata_with_cifar10
+# from sklearn.metrics import log_loss
+# from keras.preprocessing.image import ImageDataGenerator
 
-from sklearn.metrics import log_loss
 from custom_layers.scale_layer import Scale
 
 # from load_cifar10 import load_cifar10_data
+
+# from load_my_data import load_mydata_with_cifar10
 
 def densenet121_model(img_rows, img_cols, color_type=1, nb_dense_block=4, growth_rate=32, \
                         nb_filter=64, reduction=0.5, dropout_rate=0.0, weight_decay=1e-4, num_classes=None):
@@ -77,7 +84,7 @@ def densenet121_model(img_rows, img_cols, color_type=1, nb_dense_block=4, growth
 
     # Add dense blocks
     for block_idx in range(nb_dense_block - 1):
-        stage = block_idx + 2
+        stage = block_idx+2
         tensor_x, nb_filter = dense_block(tensor_x, stage, nb_layers[block_idx], nb_filter, \
                                             growth_rate, dropout_rate=dropout_rate, weight_decay=weight_decay)
 
@@ -94,51 +101,54 @@ def densenet121_model(img_rows, img_cols, color_type=1, nb_dense_block=4, growth
     tensor_x = Scale(axis=CONCAT_AXIS, name='conv' + str(final_stage) + '_blk_scale')(tensor_x)
     tensor_x = Activation('relu', name='relu' + str(final_stage) + '_blk')(tensor_x)
 
-    x_fc = GlobalAveragePooling2D(name='pool' + str(final_stage))(tensor_x)
-    x_fc = Dense(1000, name='fc6')(x_fc)
-    x_fc = Activation('softmax', name='prob')(x_fc)
+    # x_fc = GlobalAveragePooling2D(name='pool' + str(final_stage))(tensor_x)
+    # x_fc = Dense(1000, name='fc6')(x_fc)
+    # x_fc = Activation('softmax', name='prob')(x_fc)
 
-    model = Model(img_input, x_fc, name='densenet')
+    # model = Model(img_input, x_fc, name='densenet')
 
-    if K.image_dim_ordering() == 'th':
-        # Use pre-trained weights for Theano backend
-        weights_path = 'imagenet_models/densenet121_weights_th.h5'
-    else:
-        # Use pre-trained weights for Tensorflow backend
-        weights_path = 'imagenet_models/densenet121_weights_tf.h5'
+    # if K.image_dim_ordering() == 'th':
+    #     # Use pre-trained weights for Theano backend
+    #     weights_path = 'imagenet_models/densenet121_weights_th.h5'
+    # else:
+    #     # Use pre-trained weights for Tensorflow backend
+    #     weights_path = 'imagenet_models/densenet121_weights_tf.h5'
 
-    model.load_weights(weights_path, by_name=True)
+    # model.load_weights(weights_path, by_name=True)
 
-    # # 固定参数
-    # for layer in model.layers:
-    #     layer.trainable = False
-
-    # # Truncate and replace softmax layer for transfer learning
-    # # Cannot use model.layers.pop() since model is not of Sequential() type
-    # # The method below works since pre-trained weights are stored in layers but not in the model
-    # x_newfc = GlobalAveragePooling2D(name='pool'+str(final_stage))(tensor_x)
+    # Truncate and replace softmax layer for transfer learning
+    # Cannot use model.layers.pop() since model is not of Sequential() type
+    # The method below works since pre-trained weights are stored in layers but not in the model
+    tensor_x = Conv2D(128, (3, 3), name='conv_new', use_bias=False)(tensor_x)
+    tensor_x = AveragePooling2D((2, 2), strides=(2, 2), name='pool_new')(tensor_x)
+    tensor_x = BatchNormalization(epsilon=eps, axis=CONCAT_AXIS, name='bn_new')(tensor_x)
+    tensor_x = Activation('relu', name='relu_new')(tensor_x)
+    x_newfc = GlobalAveragePooling2D(name='pool'+str(final_stage))(tensor_x)
+    x_newfc = Dense(num_classes, name='fc6')(x_newfc)
+    x_newfc = Activation('softmax', name='prob')(x_newfc)
+    # x_newfc = MaxPooling2D((2, 2), strides=(2, 2), name='pool'+str(final_stage))(tensor_x)
+    # x_newfc = GlobalAveragePooling2D(name='new_maxpool')(x_newfc) # new max pooling layer
     # x_newfc = Dense(num_classes, name='fc6')(x_newfc)
     # x_newfc = Activation('softmax', name='prob')(x_newfc)
 
-    # new_model = Model(img_input, x_newfc)
+    model = Model(img_input, x_newfc)
+    model.load_weights('cifar10_weights.h5', by_name=True)
 
-    # # Learning rate is changed to 0.001
+    # Learning rate is changed to 0.001
     # sgd = SGD(lr=1e-3, decay=1e-6, momentum=0.9, nesterov=True)
-    # new_model.compile(optimizer=sgd, loss='categorical_crossentropy', metrics=['accuracy'])
+    # model.compile(optimizer=sgd, loss='categorical_crossentropy', metrics=['accuracy'])
 
     return model
 
 def conv_block(tensor_x, stage, branch, nb_filter, dropout_rate=None, weight_decay=1e-4):
-    '''
-    ### 说明:
-        Apply BatchNorm, Relu, bottleneck 1x1 Conv2D, 3x3 Conv2D, and option dropout
-    ### Arguments
-        - tensor_x: input tensor
-        - stage: index for dense block
-        - branch: layer index within each dense block
-        - nb_filter: number of filters
-        - dropout_rate: dropout rate
-        - weight_decay: weight decay factor
+    '''Apply BatchNorm, Relu, bottleneck 1x1 Conv2D, 3x3 Conv2D, and option dropout
+        ### Arguments
+            - tensor_x: input tensor
+            - stage: index for dense block
+            - branch: layer index within each dense block
+            - nb_filter: number of filters
+            - dropout_rate: dropout rate
+            - weight_decay: weight decay factor
     '''
     eps = 1.1e-5
     conv_name_base = 'conv' + str(stage) + '_' + str(branch)
@@ -167,16 +177,14 @@ def conv_block(tensor_x, stage, branch, nb_filter, dropout_rate=None, weight_dec
     return tensor_x
 
 def transition_block(tensor_x, stage, nb_filter, compression=1.0, dropout_rate=None, weight_decay=1E-4):
-    '''
-    # 说明:
-        Apply BatchNorm, 1x1 Convolution, averagePooling, optional compression, dropout
-    # Arguments
-        - tensor_x: input tensor
-        - stage: index for dense block
-        - nb_filter: number of filters
-        - compression: calculated as 1 - reduction. Reduces the number of feature maps in the transition block.
-        - dropout_rate: dropout rate
-        - weight_decay: weight decay factor
+    ''' Apply BatchNorm, 1x1 Convolution, averagePooling, optional compression, dropout
+        ### Arguments
+            - tensor_x: input tensor
+            - stage: index for dense block
+            - nb_filter: number of filters
+            - compression: calculated as 1 - reduction. Reduces the number of feature maps in the transition block.
+            - dropout_rate: dropout rate
+            - weight_decay: weight decay factor
     '''
 
     eps = 1.1e-5
@@ -199,18 +207,16 @@ def transition_block(tensor_x, stage, nb_filter, compression=1.0, dropout_rate=N
 
 def dense_block(tensor_x, stage, nb_layers, nb_filter, growth_rate, dropout_rate=None, \
                 weight_decay=1e-4, grow_nb_filters=True):
-    '''
-    # 说明:
-        Build a dense_block where the output of each conv_block is fed to subsequent ones
-    # Arguments
-        - tensor_x: input tensor
-        - stage: index for dense block
-        - nb_layers: the number of layers of conv_block to append to the model.
-        - nb_filter: number of filters
-        - growth_rate: growth rate
-        - dropout_rate: dropout rate
-        - weight_decay: weight decay factor
-        - grow_nb_filters: flag to decide to allow number of filters to grow
+    ''' Build a dense_block where the output of each conv_block is fed to subsequent ones
+        ### Arguments
+            - tensor_x: input tensor
+            - stage: index for dense block
+            - nb_layers: the number of layers of conv_block to append to the model.
+            - nb_filter: number of filters
+            - growth_rate: growth rate
+            - dropout_rate: dropout rate
+            - weight_decay: weight decay factor
+            - grow_nb_filters: flag to decide to allow number of filters to grow
     '''
 
     # eps = 1.1e-5
@@ -228,88 +234,48 @@ def dense_block(tensor_x, stage, nb_layers, nb_filter, growth_rate, dropout_rate
 
     return concat_feat, nb_filter
 
-def add_new_layer(base_model, nb_classes):
-    '''
-    ### 说明:
-        - 增加模型的层
-    ### 参数:
-        - base_model: 原始模型
-        - nb_classes: 新模型的分类
-    ### 返回:
-        - model: 新模型
-    '''
-
-    # 并获取模型输出
-    # temp_model = Model(inputs=base_model.inputs, outputs=base_model.get_layer('relu5_blk').output)
-    # tenser_x = temp_model.outputs
-    tenser_x = base_model.get_layer('relu5_blk').output
-
-    # 增加新的层
-    tenser_x = GlobalAveragePooling2D()(tenser_x)
-    # tenser_x = Dense(1024, activation='relu')(tenser_x) # new FC
-    predictions = Dense(nb_classes, activation='softmax')(tenser_x) # new softmax
-
-    model = Model(inputs=base_model.input, outputs=predictions)
-    return model
-
-def setup_to_transfer_learn(model, base_model):
-    '''
-    ### 说明:
-        - 固定参数，设置迁移学习
-    ### 参数:
-        - model: 新模型
-        - base_model: 原始模型
-    ### 返回:
-        - 无
-    '''
-
-    for layer in base_model.layers:
-        layer.trainable = False
-    model.compile(optimizer='rmsprop', loss='categorical_crossentropy', metrics=['accuracy'])
-
 if __name__ == '__main__':
 
-    # Example to fine-tune on n samples from digestive data
-
-    IMG_ROWS, IMG_COLS = 224, 224 # Resolution of inputs
+    IMG_ROWS, IMG_COLS = 480, 480 # Resolution of inputs
     CHANNEL = 3
     NUM_CLASSES = 3
-    BATCH_SIZE = 32
-    EPOCHS = 50
 
-    NUM_TRAIN_SAMPLES = 23968
-    NUM_VALID_SAMPLES = 10275
-    NUM_BATCH = 30
-
-    # Load Cifar10 data. Please implement your own load_data() module for your own dataset
-    # X_TRAIN, Y_TRAIN, X_VALID, Y_VALID = load_cifar10_data(IMG_ROWS, IMG_COLS)
-    X_TRAIN, Y_TRAIN = load_mydata_with_cifar10('./my_data_set/', 'train', \
-                                                NUM_TRAIN_SAMPLES, NUM_BATCH, 224, NUM_CLASSES, 0.8)
-    X_VALID, Y_VALID = load_mydata_with_cifar10('./my_data_set/', 'valid', \
-                                                NUM_VALID_SAMPLES, NUM_BATCH, 224, NUM_CLASSES, 0.8)
-
-    X_TRAIN = X_TRAIN.astype('float32') / 255.0
-    X_VALID = X_VALID.astype('float32') / 255.0
+    BATCH_SIZE = 512
 
     # Load our model
-    BASE_MODEL = densenet121_model(img_rows=IMG_ROWS, img_cols=IMG_COLS, color_type=CHANNEL, num_classes=NUM_CLASSES)
-    MODEL = add_new_layer(BASE_MODEL, NUM_CLASSES)
-    setup_to_transfer_learn(MODEL, BASE_MODEL)
+    MODEL = densenet121_model(img_rows=IMG_ROWS, img_cols=IMG_COLS, color_type=CHANNEL, num_classes=NUM_CLASSES)
 
-    #
-    MODEL.fit(X_TRAIN, Y_TRAIN,
-              batch_size=BATCH_SIZE,
-              epochs=EPOCHS,
-              shuffle=True,
-              verbose=2,
-              validation_data=(X_VALID, Y_VALID))
+    # 数据路径
+    DIGESTIVE_DIR = u'/home/tensorflow/digestive_change'
+    CLASSIFIED_DIR = u'/home/densenet/cnn_finetune-master/results_480'
 
-    # save model
-    save_model(MODEL, 'cifar10_transfer.h5')
-    MODEL.save_weights('cifar10_transfer_weights.h5')
+    # 每个数据处理
+    DATA_DIRS = []
+    for data_dir in os.listdir(DIGESTIVE_DIR):
+        DATA_DIRS.append(os.path.join(DIGESTIVE_DIR, data_dir))
 
-    # Make predictions
-    PREDICTIONS_VALID = MODEL.predict(X_VALID, batch_size=BATCH_SIZE, verbose=1)
+    for data_dir in DATA_DIRS:
+        # print os.path.basename(data_dir)
+        imagelists = [img for img in os.listdir(data_dir) if img.endswith('jpg')]
+        imagelists.sort()
+        # imagelists = imagelists[0:2]
 
-    # Cross-entropy loss score
-    SCORE = log_loss(Y_VALID, PREDICTIONS_VALID)
+        batch_num = int(math.ceil(float(len(imagelists)) / float(BATCH_SIZE)))
+        # print batch_num
+
+        predictions = []
+        for batch_idx in xrange(batch_num):
+            start = batch_idx * BATCH_SIZE
+            end = min((batch_idx + 1) * BATCH_SIZE, len(imagelists))
+
+            imgs = []
+            for idx in xrange(start, end):
+                img = cv2.imread(os.path.join(data_dir, imagelists[idx]).encode('utf8'))
+                # img = cv2.resize(img[80:400, 80:400, :], (224, 224))
+                img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+                imgs.append(img)
+            imgs = np.array(imgs, dtype='float32') / 255.0
+            prediction = np.argmax(MODEL.predict(np.array(imgs)), 1).tolist()
+            predictions.extend(prediction)
+            # print batch_idx, len(predictions)
+        scio.savemat(os.path.join(CLASSIFIED_DIR, os.path.basename(data_dir) + '.mat'), {'data': predictions})

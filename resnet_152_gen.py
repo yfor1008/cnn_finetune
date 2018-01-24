@@ -3,8 +3,8 @@
 # resnet_152.py
 # @Author       : yuanwenjin
 # @Mail         : yfor1008@gmail.com
-# @Date         : 2017/7/14 ����9:23:13
-# @Explanation  : finetune�Լ�����
+# @Date         : 2017/7/14 上午9:23:13
+# @Explanation  : finetune自己数据
 """
 
 from keras.models import Sequential
@@ -28,7 +28,7 @@ sys.setrecursionlimit(3000)
 
 def identity_block(input_tensor, kernel_size, filters, stage, block):
     """
-    ### ˵��:
+    ### 说明:
         - The identity_block is the block that has no conv layer at shortcut
 
     ### Arguments:
@@ -65,7 +65,7 @@ def identity_block(input_tensor, kernel_size, filters, stage, block):
 
 def conv_block(input_tensor, kernel_size, filters, stage, block, strides=(2, 2)):
     '''
-    ### ˵��
+    ### 说明
         - conv_block is the block that has a conv layer at shortcut
 
     ### Arguments
@@ -75,7 +75,7 @@ def conv_block(input_tensor, kernel_size, filters, stage, block, strides=(2, 2))
         - stage: integer, current stage label, used for generating layer names
         - block: 'a','b'..., current block label, used for generating layer names
 
-    ### ע��
+    ### 注意
         - Note that from stage 3, the first conv layer at main path is with strides=(2,2)
         - And the shortcut should have strides=(2,2) as well
     '''
@@ -168,11 +168,11 @@ def resnet152_model(img_rows, img_cols, color_type=1, num_classes=None):
     model = Model(img_input, x_fc)
 
     if K.image_dim_ordering() == 'th':
-      	# Use pre-trained weights for Theano backend
-      	weights_path = 'imagenet_models/resnet152_weights_th.h5'
+        # Use pre-trained weights for Theano backend
+        weights_path = 'imagenet_models/resnet152_weights_th.h5'
     else:
-      	# Use pre-trained weights for Tensorflow backend
-      	weights_path = 'imagenet_models/resnet152_weights_tf.h5'
+        # Use pre-trained weights for Tensorflow backend
+        weights_path = 'imagenet_models/resnet152_weights_tf.h5'
 
     model.load_weights(weights_path, by_name=True)
 
@@ -182,16 +182,60 @@ def resnet152_model(img_rows, img_cols, color_type=1, num_classes=None):
     # x_newfc = AveragePooling2D((7, 7), name='avg_pool')(x)
     # x_newfc = Flatten()(x_newfc)
     # x_newfc = Dense(num_classes, activation='softmax', name='fc8')(x_newfc)
-    x_newfc = GlobalAveragePooling2D(name='avg_pool')(x)
-    x_newfc = Dense(num_classes, activation='softmax', name='fc8')(x_newfc)
+    # x_newfc = GlobalAveragePooling2D(name='avg_pool')(x)
+    # x_newfc = Dense(num_classes, activation='softmax', name='fc8')(x_newfc)
 
-    model = Model(img_input, x_newfc)
+    # model = Model(img_input, x_newfc)
 
-    # Learning rate is changed to 0.001
-    sgd = SGD(lr=1e-3, decay=1e-6, momentum=0.9, nesterov=True)
-    model.compile(optimizer=sgd, loss='categorical_crossentropy', metrics=['accuracy'])
+    # # Learning rate is changed to 0.001
+    # sgd = SGD(lr=1e-3, decay=1e-6, momentum=0.9, nesterov=True)
+    # model.compile(optimizer=sgd, loss='categorical_crossentropy', metrics=['accuracy'])
 
     return model
+
+def add_new_layer(base_model, nb_classes):
+    '''
+    ### 说明:
+        - 增加模型的层
+
+    ### 参数:
+        - base_model: 原始模型
+        - nb_classes: 新模型的分类
+
+    ### 返回:
+        - model: 新模型
+    '''
+
+    # 并获取模型输出
+    # temp_model = Model(inputs=base_model.inputs, outputs=base_model.get_layer('relu5_blk').output)
+    tensor_x = base_model.get_layer('res5c_relu').output
+
+    # 增加新的层
+    tensor_x = GlobalAveragePooling2D(name='avg_pool')(tensor_x)
+    # tenser_x = Dense(1024, activation='relu')(tenser_x) # new FC
+    predicts = Dense(nb_classes, activation='softmax')(tensor_x) # new softmax
+
+    model = Model(inputs=base_model.input, outputs=predicts)
+    return model
+
+def setup_to_transfer_or_finetune(model, base_model, mode):
+    '''
+    ### 说明:
+        - 固定参数，设置迁移学习，不固定参数，进行fine-tune
+
+    ### 参数:
+        - model: 新模型
+        - base_model: 原始模型
+        - mode: 模式，transfer or finetune
+
+    ### 返回:
+        - 无
+    '''
+
+    if mode == 'transfer':
+        for layer in base_model.layers:
+            layer.trainable = False
+    model.compile(optimizer='rmsprop', loss='categorical_crossentropy', metrics=['accuracy'])
 
 if __name__ == '__main__':
 
@@ -203,41 +247,46 @@ if __name__ == '__main__':
     BATCH_SIZE = 8
     EPOCHS = 30
 
-    # # ��������
-    # TRAIN_DIR = '/home/get_samples/samples_train/train'
-    # VALID_DIR = '/home/get_samples/samples_train/valid'
-    # DATA_GEN = ImageDataGenerator(rescale=1./255, \
-    #                               rotation_range=15, \
-    #                               shear_range=10, \
-    #                               horizontal_flip=True, \
-    #                               vertical_flip=True)
-    # TRAIN_GEN = DATA_GEN.flow_from_directory(directory=TRAIN_DIR, \
-    #                                          target_size=(IMG_ROWS, IMG_COLS), \
-    #                                          batch_size=BATCH_SIZE, \
-    #                                          class_mode='categorical')
-    # VALID_GEN = DATA_GEN.flow_from_directory(directory=VALID_DIR, \
-    #                                          target_size=(IMG_ROWS, IMG_COLS), \
-    #                                          batch_size=BATCH_SIZE, \
-    #                                          class_mode='categorical')
+    # 设置训练类型，transfer learning or finetune
+    MODE = 'transfer'
+
+    # 数据生成
+    TRAIN_DIR = '/home/get_samples/samples_train/train'
+    VALID_DIR = '/home/get_samples/samples_train/valid'
+    DATA_GEN = ImageDataGenerator(rescale=1./255, \
+                                  rotation_range=15, \
+                                  shear_range=10, \
+                                  horizontal_flip=True, \
+                                  vertical_flip=True)
+    TRAIN_GEN = DATA_GEN.flow_from_directory(directory=TRAIN_DIR, \
+                                             target_size=(IMG_ROWS, IMG_COLS), \
+                                             batch_size=BATCH_SIZE, \
+                                             class_mode='categorical')
+    VALID_GEN = DATA_GEN.flow_from_directory(directory=VALID_DIR, \
+                                             target_size=(IMG_ROWS, IMG_COLS), \
+                                             batch_size=BATCH_SIZE, \
+                                             class_mode='categorical')
 
     # Load our model
-    MODEL = resnet152_model(img_rows=IMG_ROWS, img_cols=IMG_COLS, color_type=CHANNEL, \
-                              num_classes=NUM_CLASSES)
-    MODEL.summary()
+    BASE_MODEL = resnet152_model(img_rows=IMG_ROWS, img_cols=IMG_COLS, color_type=CHANNEL, \
+                                   num_classes=NUM_CLASSES)
+    MODEL = add_new_layer(BASE_MODEL, NUM_CLASSES)
+    setup_to_transfer_or_finetune(MODEL, BASE_MODEL, MODE)
+    # MODEL.summary()
 
-    # # Start Fine-tuning
-    # # EATLYSTOP = EarlyStopping(monitor='val_loss', min_delta=0.001, patience=5, verbose=1, mode='auto')
-    # MODELCHECHPOINT = ModelCheckpoint('resnet_weights.h5', monitor='val_loss', \
-    #                                     verbose=1, save_weights_only=True)
-    # HIST = MODEL.fit_generator(TRAIN_GEN, \
-    #                            steps_per_epoch=6000, \
-    #                            epochs=EPOCHS, \
-    #                            verbose=1, \
-    #                            callbacks=[MODELCHECHPOINT], \
-    #                            validation_data=VALID_GEN, \
-    #                            validation_steps=1500)
-    # print HIST.history
+    # Start Fine-tuning
+    # EATLYSTOP = EarlyStopping(monitor='val_loss', min_delta=0.001, patience=5, verbose=1, mode='auto')
+    MODELCHECHPOINT = ModelCheckpoint('resnet_gen_' + MODE + '_weights.h5', monitor='val_loss', \
+                                        verbose=1, save_weights_only=True)
+    HIST = MODEL.fit_generator(TRAIN_GEN, \
+                               steps_per_epoch=6000, \
+                               epochs=EPOCHS, \
+                               verbose=1, \
+                               callbacks=[MODELCHECHPOINT], \
+                               validation_data=VALID_GEN, \
+                               validation_steps=1500)
+    print HIST.history
 
-    # # save model
-    # # save_model(MODEL, 'resnet.h5')
-    # MODEL.save_weights('resnet_weights.h5')
+    # save model
+    # save_model(MODEL, 'resnet_gen_' + MODE + '.h5')
+    MODEL.save_weights('resnet_gen_' + MODE + '_weights.h5')

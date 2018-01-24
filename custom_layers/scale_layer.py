@@ -1,3 +1,13 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+"""
+# scale_layer.py
+# @Author       : yuanwenjin
+# @Mail         : yfor1008@gmail.com
+# @Date         : 2018-1-16 14:17:02
+# @Explanation  : scale
+"""
+
 from keras.layers.core import Layer
 from keras.engine import InputSpec
 from keras import backend as K
@@ -34,11 +44,13 @@ class Scale(Layer):
             Theano/TensorFlow function to use for weights initialization.
             This parameter is only relevant if you don't pass a `weights` argument.
     '''
-    def __init__(self, weights=None, axis=-1, momentum = 0.9, beta_init='zero', gamma_init='one', **kwargs):
+    def __init__(self, weights=None, axis=-1, momentum=0.9, beta_init='zero', gamma_init='one', **kwargs):
         self.momentum = momentum
         self.axis = axis
         self.beta_init = initializations.get(beta_init)
         self.gamma_init = initializations.get(gamma_init)
+        self.beta = []
+        self.gamma = []
         self.initial_weights = weights
         super(Scale, self).__init__(**kwargs)
 
@@ -57,7 +69,7 @@ class Scale(Layer):
             self.set_weights(self.initial_weights)
             del self.initial_weights
 
-    def call(self, x, mask=None):
+    def call(self, x):
         input_shape = self.input_spec[0].shape
         broadcast_shape = [1] * len(input_shape)
         broadcast_shape[self.axis] = input_shape[self.axis]

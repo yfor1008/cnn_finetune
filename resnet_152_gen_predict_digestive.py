@@ -1,12 +1,17 @@
 # -*- coding: utf-8 -*-
 """
-# resnet_152.py
+# resnet_152_gen_predict_digestive.py
 # @Author       : yuanwenjin
 # @Mail         : yfor1008@gmail.com
-# @Date         : 2017/7/14 ����9:23:13
-# @Explanation  : finetune�Լ�����
+# @Date         : 2017/7/14 上午9:23:13
+# @Explanation  : finetune自己数据
 """
 
+import os
+import math
+import numpy as np
+import scipy.io as scio
+import cv2
 from keras.models import Sequential
 from keras.optimizers import SGD
 from keras.layers import Input, Dense, Conv2D, MaxPooling2D, AveragePooling2D, GlobalAveragePooling2D, ZeroPadding2D, Dropout, Flatten, add, Reshape, Activation
@@ -28,7 +33,7 @@ sys.setrecursionlimit(3000)
 
 def identity_block(input_tensor, kernel_size, filters, stage, block):
     """
-    ### ˵��:
+    ### 说明:
         - The identity_block is the block that has no conv layer at shortcut
 
     ### Arguments:
@@ -65,7 +70,7 @@ def identity_block(input_tensor, kernel_size, filters, stage, block):
 
 def conv_block(input_tensor, kernel_size, filters, stage, block, strides=(2, 2)):
     '''
-    ### ˵��
+    ### 说明
         - conv_block is the block that has a conv layer at shortcut
 
     ### Arguments
@@ -75,7 +80,7 @@ def conv_block(input_tensor, kernel_size, filters, stage, block, strides=(2, 2))
         - stage: integer, current stage label, used for generating layer names
         - block: 'a','b'..., current block label, used for generating layer names
 
-    ### ע��
+    ### 注意
         - Note that from stage 3, the first conv layer at main path is with strides=(2,2)
         - And the shortcut should have strides=(2,2) as well
     '''
@@ -167,14 +172,14 @@ def resnet152_model(img_rows, img_cols, color_type=1, num_classes=None):
 
     model = Model(img_input, x_fc)
 
-    if K.image_dim_ordering() == 'th':
-      	# Use pre-trained weights for Theano backend
-      	weights_path = 'imagenet_models/resnet152_weights_th.h5'
-    else:
-      	# Use pre-trained weights for Tensorflow backend
-      	weights_path = 'imagenet_models/resnet152_weights_tf.h5'
+    # if K.image_dim_ordering() == 'th':
+    #     # Use pre-trained weights for Theano backend
+    #     weights_path = 'imagenet_models/resnet101_weights_th.h5'
+    # else:
+    #     # Use pre-trained weights for Tensorflow backend
+    #     weights_path = 'imagenet_models/resnet101_weights_tf.h5'
 
-    model.load_weights(weights_path, by_name=True)
+    # model.load_weights(weights_path, by_name=True)
 
     # Truncate and replace softmax layer for transfer learning
     # Cannot use model.layers.pop() since model is not of Sequential() type
@@ -182,16 +187,60 @@ def resnet152_model(img_rows, img_cols, color_type=1, num_classes=None):
     # x_newfc = AveragePooling2D((7, 7), name='avg_pool')(x)
     # x_newfc = Flatten()(x_newfc)
     # x_newfc = Dense(num_classes, activation='softmax', name='fc8')(x_newfc)
-    x_newfc = GlobalAveragePooling2D(name='avg_pool')(x)
-    x_newfc = Dense(num_classes, activation='softmax', name='fc8')(x_newfc)
 
-    model = Model(img_input, x_newfc)
+    # model = Model(img_input, x_newfc)
+    # model.load_weights('resnet_weights.h5', by_name=True)
 
     # Learning rate is changed to 0.001
-    sgd = SGD(lr=1e-3, decay=1e-6, momentum=0.9, nesterov=True)
-    model.compile(optimizer=sgd, loss='categorical_crossentropy', metrics=['accuracy'])
+    # sgd = SGD(lr=1e-3, decay=1e-6, momentum=0.9, nesterov=True)
+    # model.compile(optimizer=sgd, loss='categorical_crossentropy', metrics=['accuracy'])
 
     return model
+
+def add_new_layer(base_model, nb_classes):
+    '''
+    ### 说明:
+        - 增加模型的层
+
+    ### 参数:
+        - base_model: 原始模型
+        - nb_classes: 新模型的分类
+
+    ### 返回:
+        - model: 新模型
+    '''
+
+    # 并获取模型输出
+    # temp_model = Model(inputs=base_model.inputs, outputs=base_model.get_layer('relu5_blk').output)
+    tensor_x = base_model.get_layer('res5c_relu').output
+
+    # 增加新的层
+    tensor_x = GlobalAveragePooling2D(name='avg_pool')(tensor_x)
+    # tenser_x = Dense(1024, activation='relu')(tenser_x) # new FC
+    predicts = Dense(nb_classes, activation='softmax')(tensor_x) # new softmax
+
+    model = Model(inputs=base_model.input, outputs=predicts)
+    return model
+
+def setup_to_transfer_or_finetune(model, base_model, mode):
+    '''
+    ### 说明:
+        - 固定参数，设置迁移学习，不固定参数，进行fine-tune
+
+    ### 参数:
+        - model: 新模型
+        - base_model: 原始模型
+        - mode: 模式，transfer or finetune
+
+    ### 返回:
+        - 无
+    '''
+
+    if mode == 'transfer':
+        for layer in base_model.layers:
+            layer.trainable = False
+    model.compile(optimizer='rmsprop', loss='categorical_crossentropy', metrics=['accuracy'])
+
 
 if __name__ == '__main__':
 
@@ -200,44 +249,49 @@ if __name__ == '__main__':
     IMG_ROWS, IMG_COLS = 480, 480 # Resolution of inputs
     CHANNEL = 3
     NUM_CLASSES = 3
-    BATCH_SIZE = 8
-    EPOCHS = 30
 
-    # # ��������
-    # TRAIN_DIR = '/home/get_samples/samples_train/train'
-    # VALID_DIR = '/home/get_samples/samples_train/valid'
-    # DATA_GEN = ImageDataGenerator(rescale=1./255, \
-    #                               rotation_range=15, \
-    #                               shear_range=10, \
-    #                               horizontal_flip=True, \
-    #                               vertical_flip=True)
-    # TRAIN_GEN = DATA_GEN.flow_from_directory(directory=TRAIN_DIR, \
-    #                                          target_size=(IMG_ROWS, IMG_COLS), \
-    #                                          batch_size=BATCH_SIZE, \
-    #                                          class_mode='categorical')
-    # VALID_GEN = DATA_GEN.flow_from_directory(directory=VALID_DIR, \
-    #                                          target_size=(IMG_ROWS, IMG_COLS), \
-    #                                          batch_size=BATCH_SIZE, \
-    #                                          class_mode='categorical')
+    BATCH_SIZE = 512
+
+    # 设置训练类型，transfer learning or finetune
+    MODE = 'transfer'
 
     # Load our model
-    MODEL = resnet152_model(img_rows=IMG_ROWS, img_cols=IMG_COLS, color_type=CHANNEL, \
-                              num_classes=NUM_CLASSES)
-    MODEL.summary()
+    BASE_MODEL = resnet152_model(img_rows=IMG_ROWS, img_cols=IMG_COLS, color_type=CHANNEL, \
+                                   num_classes=NUM_CLASSES)
+    MODEL = add_new_layer(BASE_MODEL, NUM_CLASSES)
+    MODEL.load_weights('resnet_gen_' + MODE + '_weights.h5')
 
-    # # Start Fine-tuning
-    # # EATLYSTOP = EarlyStopping(monitor='val_loss', min_delta=0.001, patience=5, verbose=1, mode='auto')
-    # MODELCHECHPOINT = ModelCheckpoint('resnet_weights.h5', monitor='val_loss', \
-    #                                     verbose=1, save_weights_only=True)
-    # HIST = MODEL.fit_generator(TRAIN_GEN, \
-    #                            steps_per_epoch=6000, \
-    #                            epochs=EPOCHS, \
-    #                            verbose=1, \
-    #                            callbacks=[MODELCHECHPOINT], \
-    #                            validation_data=VALID_GEN, \
-    #                            validation_steps=1500)
-    # print HIST.history
+    # 数据路径
+    DIGESTIVE_DIR = u'/home/tensorflow/digestive_change'
+    CLASSIFIED_DIR = u'/home/densenet/cnn_finetune-master/results_resnet_480_transfer'
 
-    # # save model
-    # # save_model(MODEL, 'resnet.h5')
-    # MODEL.save_weights('resnet_weights.h5')
+    # 每个数据处理
+    DATA_DIRS = []
+    for data_dir in os.listdir(DIGESTIVE_DIR):
+        DATA_DIRS.append(os.path.join(DIGESTIVE_DIR, data_dir))
+
+    for data_dir in DATA_DIRS:
+        print os.path.basename(data_dir)
+        imagelists = [img for img in os.listdir(data_dir) if img.endswith('jpg')]
+        imagelists.sort()
+        # imagelists = imagelists[0:2]
+
+        batch_num = int(math.ceil(float(len(imagelists)) / float(BATCH_SIZE)))
+        # print batch_num
+
+        predictions = []
+        for batch_idx in xrange(batch_num):
+            start = batch_idx * BATCH_SIZE
+            end = min((batch_idx + 1) * BATCH_SIZE, len(imagelists))
+
+            imgs = []
+            for idx in xrange(start, end):
+                img = cv2.imread(os.path.join(data_dir, imagelists[idx]).encode('utf8'))
+                # img = cv2.resize(img, (224, 224))
+                img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+                imgs.append(img)
+            imgs = np.array(imgs, dtype='float32') / 255.0
+            prediction = np.argmax(MODEL.predict(np.array(imgs)), 1).tolist()
+            predictions.extend(prediction)
+            # print batch_idx, len(predictions)
+        scio.savemat(os.path.join(CLASSIFIED_DIR, os.path.basename(data_dir) + '.mat'), {'data': predictions})
